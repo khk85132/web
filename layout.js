@@ -83,10 +83,12 @@
       dr.querySelector('#loginForm').onsubmit = e => {
         e.preventDefault();
         const id = $('#loginId').value.trim(), pw = $('#loginPw').value;
-        const found = Store.get(KEYS.users, []).find(x => x.id === id && x.pw === pw);
-        if (!found) { $('#loginMsg').textContent = '아이디 또는 비밀번호가 올바르지 않습니다.'; return; }
-        Store.set(KEYS.session, { id: found.id, name: found.name });
-        location.reload();
+        Ready.then(() => {
+          const found = Store.get(KEYS.users, []).find(x => x.id === id && x.pw === pw);
+          if (!found) { $('#loginMsg').textContent = '아이디 또는 비밀번호가 올바르지 않습니다.'; return; }
+          Store.set(KEYS.session, { id: found.id, name: found.name });
+          location.reload();
+        });
       };
     }
     dr.querySelector('.drawer-close').onclick = closeAll;

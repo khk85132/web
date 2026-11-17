@@ -17,13 +17,59 @@ const KEYS = {
   branch: 'gyeol_branch'
 };
 
+/* ---------- Firebase (Firestore) 설정 ----------
+   - 회원(users) / 리뷰(reviews) / 주문(orders)은 Firestore에 저장되어 모든 기기에서 공유됩니다.
+   - 로그인 상태(session) / 장바구니(cart) / 선택한 지점(branch)은 기기마다 따로 localStorage에 저장됩니다. */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDqxNvazienrtvrNmAdBJoTQZyvqgKjf-8",
+  authDomain: "gyeol-8cb88.firebaseapp.com",
+  projectId: "gyeol-8cb88",
+  storageBucket: "gyeol-8cb88.firebasestorage.app",
+  messagingSenderId: "715525683501",
+  appId: "1:715525683501:web:777da400f057b024057ba4"
+};
+const SHARED_KEYS = [KEYS.users, KEYS.reviews, KEYS.orders];
+
+/* localStorage = 빠른 읽기용 캐시, Firestore = 실제 저장소. 읽기는 동기(기존 코드 그대로), 쓰기는 Firestore에도 반영 */
+const Remote = { db: null };
+let _resolveReady;
+const Ready = new Promise(r => { _resolveReady = r; });   // Firestore 첫 로딩이 끝나면 resolve (실패/지연 시에도 6초 후 진행)
+
 const Store = {
   get(k, d) {
     try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }
     catch (e) { return d; }
   },
-  set(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
+  set(k, v) {
+    localStorage.setItem(k, JSON.stringify(v));
+    if (Remote.db && SHARED_KEYS.indexOf(k) > -1) remoteSet(k, v);
+  }
 };
+function remoteSet(k, v) {
+  Remote.db.collection('gyeol').doc(k).set({ v: JSON.stringify(v), t: Date.now() })
+    .catch(e => console.warn('[Firestore] 저장 실패:', k, e));
+}
+(function initRemote() {
+  try {
+    if (typeof firebase === 'undefined') throw new Error('Firebase SDK를 불러오지 못했습니다.');
+    firebase.initializeApp(FIREBASE_CONFIG);
+    Remote.db = firebase.firestore();
+  } catch (e) { console.warn('[Firebase] 사용 불가 - 이 기기에만 저장됩니다:', e); _resolveReady(); return; }
+  let waiting = SHARED_KEYS.length;
+  SHARED_KEYS.forEach(k => {
+    let first = true;
+    const finish = () => { if (first) { first = false; if (--waiting === 0) _resolveReady(); } };
+    Remote.db.collection('gyeol').doc(k).onSnapshot(snap => {
+      if (snap.exists) {
+        try { localStorage.setItem(k, snap.data().v); } catch (e) {}
+      } else if (first && localStorage.getItem(k)) {
+        remoteSet(k, JSON.parse(localStorage.getItem(k)));   // 서버가 비어 있으면 이 기기의 기존 데이터를 올림 (최초 1회)
+      }
+      finish();
+    }, err => { console.warn('[Firestore] 읽기 실패:', k, err); finish(); });
+  });
+  setTimeout(_resolveReady, 6000);
+})();
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
